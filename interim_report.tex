@@ -1,0 +1,248 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{subcaption}
+
+\title{\textbf{MSML612 Interim Project Report (Group-9)} \\[0.5em]
+Identity-Preserving Story Visualization via Diffusion Models \\
+with Decoupled Identity Conditioning}
+\author{Yatish Sikka, Pratham Dabas, Boram Lee, Negin Nazemzadeh, Ritvik Chaturvedi}
+\date{April 2026}
+
+\begin{document}
+\maketitle
+
+% ============================================================
+\section{Problem Statement}
+% ============================================================
+
+Story visualization is the task of generating a coherent sequence of images from a series of textual captions that form a narrative. A critical requirement is visual consistency: characters must maintain their appearance---facial features, clothing, body shape, and color palette---across all generated frames. Without this, the image sequence fails to convey a coherent story.
+
+Current state-of-the-art methods such as StoryDiffusion~\cite{zhou2024storydiffusion} achieve improved consistency through shared self-attention mechanisms, but still exhibit noticeable identity drift, particularly in longer sequences (6+ frames) and multi-character scenes. We propose to address this by augmenting existing story visualization pipelines with an explicit identity conditioning mechanism. Specifically, we integrate identity-preserving features, extracted using adapters such as IP-Adapter~\cite{ye2023ipadapter}, into the diffusion process via decoupled cross-attention, aiming for measurable improvement in character consistency without sacrificing image quality or text-image alignment.
+
+% ============================================================
+\section{Related Work}
+% ============================================================
+
+\textbf{StoryDiffusion}~\cite{zhou2024storydiffusion} (Zhou et al., NeurIPS 2024) introduces Consistent Self-Attention, enabling character-consistent generation over long-range sequences. It is compatible with SD~1.5 and SDXL backbones and serves as our primary baseline. The method shares self-attention keys and values across all frames in a batch, allowing each frame's queries to attend to features from all other frames. While effective for short sequences, identity drift increases with sequence length.
+
+\textbf{AR-LDM}~\cite{pan2024arldm} (Pan et al., WACV 2024) is the first work to leverage latent diffusion models for story visualization, using an autoregressive approach conditioned on previous captions and generated images. It achieves strong FID scores on PororoSV, FlintstonesSV, and VIST, and serves as our secondary baseline.
+
+\textbf{Make-A-Story}~\cite{rahman2023makeastory} (Rahman et al., CVPR 2023) proposes a visual memory module that captures actor and background context across frames through sentence-conditioned soft attention. Its memory-based approach inspires our strategy of explicitly injecting character identity features.
+
+\textbf{IP-Adapter}~\cite{ye2023ipadapter} (Ye et al., 2023) introduces a lightweight adapter ($\sim$22M parameters) with a decoupled cross-attention mechanism that separates image features from text features. This allows image prompts to work alongside text prompts without interference. We adapt this mechanism to inject character identity features into the story generation pipeline.
+
+\textbf{TemporalStory}~\cite{chen2024temporalstory} (Chen et al., 2024) uses Spatial-Temporal attention instead of autoregressive approaches, with a text adapter and StoryFlow adapter for cross-sentence context. Its evaluation framework on PororoSV and FlintstonesSV provides benchmarks for comparison.
+
+% ============================================================
+\section{Approach}
+% ============================================================
+
+\subsection{Architecture Overview}
+
+We augment the StoryDiffusion pipeline with an identity preservation module consisting of three components, layered on top of Stable Diffusion 1.5:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Consistent Self-Attention (from StoryDiffusion).} During inference, self-attention keys and values in the U-Net's upsampling blocks are shared across all frames. A two-pass generation scheme is used: a \emph{write pass} generates reference frames as a batch and banks hidden states, followed by a \emph{read pass} where each remaining frame attends to the banked states. This provides the baseline cross-frame consistency mechanism.
+
+    \item \textbf{Identity Encoder.} Given a reference image of each character, we extract identity features using a pretrained encoder. We compare three encoders:
+    \begin{itemize}
+        \item IP-Adapter's CLIP ViT-H/14 image encoder (1024-dim, general visual features)
+        \item DINOv2 ViT-L/14 (1024-dim, semantically rich appearance features)
+        \item InsightFace ArcFace (512-dim, face-specific embeddings)
+    \end{itemize}
+    Each encoder feeds into a learned projection head that maps the pooled image embedding to $N=4$ identity tokens of dimension matching the U-Net's cross-attention layers (1024-dim).
+
+    \item \textbf{Decoupled Cross-Attention Injection.} Following the IP-Adapter design, we add a parallel cross-attention layer at each cross-attention block (attn2) in the U-Net. The query comes from the existing hidden states, while keys and values are projected from the identity tokens via separate learned linear layers. The output is scaled by an adjustable \texttt{identity\_scale} parameter (default 0.5) and added to the standard text cross-attention output:
+    \begin{equation}
+        \text{out} = \text{TextCrossAttn}(Q, K_\text{text}, V_\text{text}) + \lambda \cdot \text{IdentityCrossAttn}(Q, K_\text{id}, V_\text{id})
+    \end{equation}
+    where $\lambda$ is the identity scale. The identity cross-attention output projection is initialized to zeros so that the model starts as a pass-through, enabling stable training.
+\end{enumerate}
+
+\subsection{Training Strategy}
+
+During training, the U-Net, VAE, and text encoder are frozen. Only the identity adapter parameters are trained:
+\begin{itemize}[leftmargin=*]
+    \item Decoupled cross-attention K/V/output projections at each U-Net cross-attention block
+    \item Identity encoder projection head (mapping encoder features to identity tokens)
+\end{itemize}
+
+The training objective is the standard diffusion denoising loss (MSE between predicted and actual noise). Consistent Self-Attention is disabled during training since it requires the two-pass inference scheme; it is re-enabled at inference time.
+
+We use AdamW with cosine learning rate scheduling, fp16 mixed precision, and gradient accumulation to achieve an effective batch size of 8.
+
+\subsection{Datasets}
+
+\textbf{PororoSV} (primary): 10,191 training / 2,334 validation / 2,208 test stories, each with 5 consecutive captioned frames and 9 recurring cartoon characters (Pororo, Crong, Loopy, Poby, Eddy, Petty, Harry, Tongtong, Rody). We load frames directly from PNG files using AR-LDM's numpy index arrays, without HDF5 conversion. For training, we use 3 frames per story to fit within GPU memory constraints.
+
+\textbf{FlintstonesSV} (secondary): planned for cross-dataset generalization evaluation.
+
+\subsection{Evaluation Metrics}
+
+We adopt the standard evaluation protocol from prior work~\cite{maharana2021vlcstorygan}, supplemented with identity-specific metrics:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{FID} --- Fr\'{e}chet Inception Distance between generated and real images (image quality).
+    \item \textbf{Character F1} --- proportion of correctly generated characters per frame, using a fine-tuned Inception-v3 classifier on PororoSV's 9 characters.
+    \item \textbf{Frame Accuracy} --- percentage of frames where all specified characters are present (stricter than Character F1).
+    \item \textbf{Cross-Frame CLIP/DINOv2 Similarity} (proposed) --- cosine similarity of character crops across frames, directly measuring identity consistency.
+\end{itemize}
+
+% ============================================================
+\section{Implementation}
+% ============================================================
+
+\subsection{Codebase}
+
+We implemented the full pipeline from scratch in PyTorch, building on the \texttt{diffusers} library for the Stable Diffusion 1.5 backbone. The codebase is organized as follows:
+
+\begin{itemize}[leftmargin=*]
+    \item \texttt{models/consistent\_self\_attention.py} --- Reimplementation of StoryDiffusion's Consistent Self-Attention without global variables. Replaces self-attention processors on U-Net upsampling blocks with cross-frame variants that bank and share hidden states.
+    \item \texttt{models/identity\_encoder.py} --- Three identity encoder implementations (IP-Adapter CLIP, DINOv2, InsightFace), each with a learned projection to 4 identity tokens.
+    \item \texttt{models/identity\_injection.py} --- Decoupled cross-attention module (\texttt{DecoupledCrossAttnProcessor}) that replaces default cross-attention processors on the U-Net. Handles dtype management for stable mixed-precision training.
+    \item \texttt{models/story\_pipeline.py} --- End-to-end pipeline combining all components, with a flag to enable/disable Consistent Self-Attention for training vs.\ inference.
+    \item \texttt{training/train\_identity\_adapter.py} --- Training loop using HuggingFace Accelerate with gradient accumulation, cosine LR scheduling, and periodic checkpointing.
+    \item \texttt{data/preprocessing/story\_dataset.py} --- PororoSV dataset loader reading PNG files directly via numpy index arrays.
+\end{itemize}
+
+\subsection{Compute Environment}
+
+All experiments are conducted on the University of Maryland's Zaratan HPC cluster using NVIDIA V100 GPUs (32GB VRAM). Key constraints and decisions:
+
+\begin{itemize}[leftmargin=*]
+    \item V100 GPUs do not support bf16; all computation uses fp16 mixed precision.
+    \item Stable Diffusion 1.5 is used instead of SDXL due to memory constraints.
+    \item Trainable adapter parameters are kept in fp32 for gradient scaler compatibility, while frozen model weights remain in fp16.
+\end{itemize}
+
+% ============================================================
+\section{Progress and Initial Findings}
+% ============================================================
+
+\subsection{Pipeline Validation}
+
+We conducted a comprehensive smoke test to validate the full pipeline before training. Using a single PororoSV story (3 frames at $512 \times 512$ resolution), we verified:
+
+\begin{table}[h]
+\centering
+\caption{Smoke test results on a single V100-32GB GPU.}
+\begin{tabular}{ll}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Dataset size (training stories) & 10,191 \\
+Frames per story (training) & 3 \\
+Image resolution & $512 \times 512$ \\
+Latent shape per frame & $4 \times 64 \times 64$ \\
+Identity tokens per character & 4 \\
+Identity token dimension & 1024 \\
+Peak VRAM (3 frames, forward+backward) & 20.3 GB \\
+Forward+backward time (1 sample) & $\sim$1.0 s \\
+Initial diffusion loss (untrained adapter) & 0.06--0.19 \\
+\bottomrule
+\end{tabular}
+\label{tab:smoke}
+\end{table}
+
+Key findings from the validation phase:
+\begin{itemize}[leftmargin=*]
+    \item Gradients flow correctly through the identity adapter with non-zero gradient norms, confirming that the decoupled cross-attention is properly integrated into the U-Net's computation graph.
+    \item Peak VRAM of 20.3~GB for 3 frames leaves sufficient headroom on a 32~GB V100 for batch size 1 with gradient accumulation. Using 5 frames per story requires 31.6~GB, leaving no room for training overhead.
+    \item Gradient checkpointing on the U-Net did not reduce peak memory in our setup, likely because the custom attention processors bypass \texttt{diffusers}' checkpointing mechanism. We proceed without it, as 3 frames fit comfortably.
+\end{itemize}
+
+\subsection{Training}
+
+Training of the identity adapter was conducted on Zaratan with the following configuration:
+
+\begin{table}[h]
+\centering
+\caption{Training configuration.}
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Base model & Stable Diffusion 1.5 \\
+Identity encoder & IP-Adapter CLIP (ViT-H/14) \\
+Optimizer & AdamW (lr=$10^{-4}$, weight decay=0.01) \\
+LR schedule & Cosine with 500-step warmup \\
+Batch size & 1 (gradient accumulation $\times 8$) \\
+Precision & fp16 mixed precision \\
+Training steps completed & 26,000 / 30,000 \\
+Checkpoint interval & Every 2,000 steps \\
+\bottomrule
+\end{tabular}
+\label{tab:training}
+\end{table}
+
+The training run completed 26,000 of 30,000 planned steps within a 24-hour V100 allocation, producing 13 checkpoints. Training proceeded stably with the diffusion denoising loss.
+
+\subsection{Qualitative Results}
+
+We generated sample story frames from PororoSV test stories under three conditions: (1) vanilla Stable Diffusion 1.5 with no identity adapter (baseline), (2) the trained adapter at step~2,000 with identity scale $\lambda=0.1$, and (3) the trained adapter at step~26,000 with $\lambda=0.3$.
+
+\textbf{Baseline (no adapter).} Vanilla SD~1.5 generates high-quality, photorealistic images from PororoSV captions, but the outputs bear no visual resemblance to PororoSV's cartoon characters. This is expected---SD~1.5 was not trained on PororoSV and interprets captions like ``Pororo wears an aviator hat'' as generic photorealistic scenes. This confirms the need for identity conditioning.
+
+\textbf{Early checkpoint ($\lambda=0.1$, step~2,000).} At low identity scale with early weights, the generated images closely resemble the baseline, indicating the adapter has minimal effect at this stage. Importantly, image quality is preserved, confirming the zero-initialized output projection provides a stable starting point.
+
+\textbf{Late checkpoint ($\lambda=0.3$, step~26,000).} At higher identity scale with longer training, the generated images exhibit visual artifacts (repetitive stripe patterns), indicating that the adapter weights have diverged. This suggests the learning rate ($10^{-4}$) is too aggressive for the adapter's small parameter count, causing the identity cross-attention to overpower the text conditioning signal.
+
+\subsection{Analysis and Lessons Learned}
+
+The initial training run reveals several important findings:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Adapter training is sensitive to hyperparameters.} The decoupled cross-attention adapter, despite its zero-initialized output projection, diverges at a learning rate of $10^{-4}$ over 26,000 steps. The original IP-Adapter paper uses a learning rate of $10^{-5}$ with a batch size of 8, suggesting our effective learning rate is an order of magnitude too high.
+
+    \item \textbf{Domain gap between SD~1.5 and PororoSV.} Vanilla SD~1.5 has no prior knowledge of PororoSV's cartoon characters. The identity adapter alone cannot bridge this gap---it conditions on reference image features but cannot teach the base model to generate cartoon-style outputs. This motivates combining the adapter with LoRA fine-tuning on the U-Net's cross-attention layers to adapt the base model's visual vocabulary.
+
+    \item \textbf{Consistent Self-Attention is inference-only.} StoryDiffusion's two-pass generation scheme (write/read) is incompatible with standard training forward passes, requiring us to disable it during training. Cross-frame consistency at inference time depends on re-enabling this mechanism.
+\end{enumerate}
+
+% ============================================================
+\section{Remaining Work}
+% ============================================================
+
+Based on the findings from our initial experiments, we plan the following adjustments and extensions:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Hyperparameter tuning:} reduce the learning rate to $10^{-5}$ and retrain the identity adapter. Evaluate checkpoints at multiple identity scales ($\lambda \in \{0.1, 0.3, 0.5, 0.7\}$).
+    \item \textbf{LoRA fine-tuning:} apply LoRA (rank 8) to the U-Net's cross-attention layers alongside the identity adapter to adapt SD~1.5's visual vocabulary to PororoSV's cartoon domain.
+    \item \textbf{Enable CSA at inference:} re-enable Consistent Self-Attention during generation and evaluate cross-frame consistency.
+    \item \textbf{Identity encoder ablation:} train and compare DINOv2 and InsightFace variants.
+    \item \textbf{Quantitative evaluation:} compute FID, Character F1, and Frame Accuracy on the PororoSV test set.
+    \item \textbf{Implement proposed metrics:} Cross-Frame CLIP/DINOv2 Similarity for identity consistency measurement.
+    \item \textbf{Sequence length study:} measure consistency degradation over 3, 5, 7, and 10 frames.
+\end{enumerate}
+
+% ============================================================
+\bibliographystyle{plain}
+\begin{thebibliography}{9}
+
+\bibitem{zhou2024storydiffusion}
+Y.~Zhou et al., ``StoryDiffusion: Consistent Self-Attention for Long-Range Image and Video Generation,'' \emph{NeurIPS}, 2024.
+
+\bibitem{pan2024arldm}
+X.~Pan et al., ``Synthesizing Coherent Story with Auto-Regressive Latent Diffusion Models,'' \emph{WACV}, 2024.
+
+\bibitem{rahman2023makeastory}
+T.~Rahman et al., ``Make-A-Story: Visual Memory Conditioned Consistent Story Generation,'' \emph{CVPR}, 2023.
+
+\bibitem{ye2023ipadapter}
+H.~Ye et al., ``IP-Adapter: Text Compatible Image Prompt Adapter for Text-to-Image Diffusion Models,'' \emph{arXiv:2308.06721}, 2023.
+
+\bibitem{chen2024temporalstory}
+Z.~Chen et al., ``TemporalStory: Enhancing Consistency in Story Visualization using Spatial-Temporal Attention,'' \emph{arXiv:2407.09774}, 2024.
+
+\bibitem{maharana2021vlcstorygan}
+A.~Maharana and M.~Bansal, ``Integrating Visuospatial, Linguistic and Commonsense Structure into Story Visualization,'' \emph{EMNLP}, 2021.
+
+\end{thebibliography}
+
+\end{document}

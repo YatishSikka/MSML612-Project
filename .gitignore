@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+third_party/
+.env
+.ipynb_checkpoints/
+
+# Large artifacts
+data/pororo/*
+data/flintstones/*
+!data/**/.gitkeep
+outputs/
+checkpoints/
+logs/
+*.h5
+*.hdf5
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+
+# OS
+.DS_Store
+Thumbs.db

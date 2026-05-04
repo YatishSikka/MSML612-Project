@@ -1,0 +1,38 @@
+seed: 42
+
+model:
+  checkpoint: "outputs/checkpoints/step_30000.pt"
+  identity_encoder: "ip_adapter_clip"
+  identity_scale: 0.5
+  torch_dtype: "float16"
+
+data:
+  pororo_png_dir: "/home/batman/scratch.msml612pcs3/data/pororo/raw/pororo_png"
+  flintstones_png_dir: "/home/batman/scratch.msml612pcs3/data/flintstones/raw"
+
+eval:
+  dataset: "pororo"                     # pororo | flintstones
+  split: "test"
+  batch_size: 1
+  image_resolution: 512
+  frames_per_story: 5
+  num_stories: null                     # null = full split
+  output_dir: "outputs/eval"
+
+metrics:
+  fid: true
+  character_f1: true
+  frame_accuracy: true
+  cross_frame_clip: true
+  cross_frame_dino: true
+
+classifiers:
+  # Fine-tuned Inception-v3 from VLCStoryGan, per-character
+  pororo_inception: "checkpoints/vlcstorygan_pororo_inception.pth"
+  flintstones_inception: null
+
+ablations:
+  identity_encoders: ["ip_adapter_clip", "dinov2", "insightface"]
+  identity_scales: [0.0, 0.3, 0.5, 0.7, 1.0]
+  sequence_lengths: [3, 5, 7, 10]
+  character_counts: [1, 2, 3]
