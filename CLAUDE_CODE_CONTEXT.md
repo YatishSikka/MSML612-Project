@@ -321,9 +321,14 @@ project/
 - ~~Step 3~~ — Metrics on `gen_scale05` DONE. Results: `outputs/eval/results_scale05.json`
 - ~~VLCStoryGan classifier~~ — downloaded to `checkpoints/vlcstorygan_pororo_inception.pth` (raw OrderedDict, keys like `Conv2d_1a_3x3.conv.weight`). `load_classifier()` handles it correctly.
 - ~~`evaluation/compute_dino_similarity.py`~~ — switched from `torch.hub` to HuggingFace `facebook/dinov2-large` (avoids xformers/scipy/OpenBLAS issues on Zaratan). Uses `outputs.last_hidden_state[:, 0]` for CLS token.
+- ~~`evaluation/compute_ips.py`~~ — NEW: Identity Preservation Score. CLIP cosine similarity between reference image (GT frame 0) and each generated frame. Averaged across frames and stories. Added to `run_all_metrics.py` and `eval_config.yaml`.
+- **`--num_stories` flag is `--num_stories` (double dash)** — easy typo, caused gen to fail silently.
 - ~~Step 4~~ — `gen_scale00` DONE (2208 stories). Metrics done: `outputs/eval/results_scale00.json`.
-- Step 5 IN PROGRESS — scale ablations (0.3, 0.7, 1.0) running, 500 stories each.
-- TODO: CSA ablation (`use_consistent_self_attn=False`) — 500 stories
+- ~~Step 5~~ — scale ablations (0.3, 0.7, 1.0) DONE. Results in `outputs/eval/results_scale{03,07,10}.json`.
+- Step 6 IN PROGRESS — CSA ablation (`use_consistent_self_attn=False`) generating 500 stories on second GPU srun.
+- IPS metric IN PROGRESS — running on all 5 gen dirs (scale00/03/05/07/10) on first GPU srun.
+- TODO: IPS results → update table
+- TODO: CSA ablation metrics → update table
 - TODO: Encoder ablation (DINOv2, InsightFace)
 - TODO: FlintstonesSV generalization
 
@@ -333,12 +338,12 @@ project/
 |-----------|------|----------|------------|-------|---------|
 | scale=0.5 (main) | 310.23 | 0.2557 | 0.0375 | 0.9132 | 0.7232 |
 | scale=0.0 (baseline) | 295.82 | 0.2572 | 0.0387 | 0.9106 | 0.7275 |
-| scale=0.3 | — | — | — | — | — |
-| scale=0.7 | — | — | — | — | — |
-| scale=1.0 | — | — | — | — | — |
+| scale=0.3 | 306.33 | 0.307 | 0.026 | 0.9120 | 0.7202 |
+| scale=0.7 | 313.64 | 0.304 | 0.020 | 0.9142 | 0.7208 |
+| scale=1.0 | 311.24 | 0.303 | 0.022 | 0.9136 | 0.7189 |
 | CSA off | — | — | — | — | — |
 
-Note: High FID is expected — SD 1.5 generates photorealistic images while PororoSV is cartoon. Key comparison is CLIP/DINOv2 consistency across ablations. Scale ablations (0.3, 0.7, 1.0) and CSA ablation currently running (500 stories each).
+Note: High FID is expected — SD 1.5 generates photorealistic images while PororoSV is cartoon. Key comparison is cross-frame CLIP/DINOv2 consistency and IPS across ablations. IPS column pending — running now. CSA ablation pending.
 
 **Remaining eval commands:**
 

@@ -16,6 +16,7 @@ from evaluation.compute_clip_similarity import (
 from evaluation.compute_dino_similarity import compute_cross_frame_dino
 from evaluation.compute_fid import compute_fid
 from evaluation.compute_frame_accuracy import compute_frame_accuracy
+from evaluation.compute_ips import compute_ips
 
 
 def main():
@@ -54,6 +55,17 @@ def main():
             results["cross_frame_clip"] = compute_cross_frame_clip(crops, device=device)
         if metrics.get("cross_frame_dino"):
             results["cross_frame_dino"] = compute_cross_frame_dino(crops, device=device)
+    if metrics.get("ips"):
+        data_dir = (cfg["data"]["pororo_png_dir"] if cfg["eval"]["dataset"] == "pororo"
+                    else cfg["data"]["flintstones_png_dir"])
+        results["ips"] = compute_ips(
+            gen_dir=args.gen_dir, data_dir=data_dir,
+            split=cfg["eval"]["split"],
+            image_resolution=cfg["eval"]["image_resolution"],
+            frames_per_story=cfg["eval"]["frames_per_story"],
+            num_stories=cfg["eval"].get("num_stories"),
+            device=device,
+        )
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -25,6 +25,7 @@ metrics:
   frame_accuracy: true
   cross_frame_clip: true
   cross_frame_dino: true
+  ips: true
 
 classifiers:
   # Fine-tuned Inception-v3 from VLCStoryGan, per-character
