@@ -325,25 +325,29 @@ project/
 - **`--num_stories` flag is `--num_stories` (double dash)** — easy typo, caused gen to fail silently.
 - ~~Step 4~~ — `gen_scale00` DONE (2208 stories). Metrics done: `outputs/eval/results_scale00.json`.
 - ~~Step 5~~ — scale ablations (0.3, 0.7, 1.0) DONE. Results in `outputs/eval/results_scale{03,07,10}.json`.
-- Step 6 IN PROGRESS — CSA ablation (`use_consistent_self_attn=False`) generating 500 stories on second GPU srun.
-- IPS metric IN PROGRESS — running on all 5 gen dirs (scale00/03/05/07/10) on first GPU srun.
-- TODO: IPS results → update table
-- TODO: CSA ablation metrics → update table
-- TODO: Encoder ablation (DINOv2, InsightFace)
-- TODO: FlintstonesSV generalization
+- ~~Step 6~~ — CSA ablation DONE. Results: `outputs/eval/results_nocsa.json`. FID=158.86, CLIP=0.8674, DINOv2=0.6121, IPS=0.7844.
+- ~~IPS metric~~ — DONE. Results: scale00=0.7604, scale03=0.7709, scale05=0.7737, scale07=0.7778, scale10=0.7797. Monotonically rising with scale — primary positive result.
+- **Phase 4 COMPLETE.** All eval runs finished.
+- TODO: Encoder ablation (DINOv2, InsightFace) — lower priority
+- TODO: FlintstonesSV generalization — lower priority
 
 **Results so far (2026-05-03):**
 
-| Condition | FID↓ | Char F1↑ | Frame Acc↑ | CLIP↑ | DINOv2↑ |
-|-----------|------|----------|------------|-------|---------|
-| scale=0.5 (main) | 310.23 | 0.2557 | 0.0375 | 0.9132 | 0.7232 |
-| scale=0.0 (baseline) | 295.82 | 0.2572 | 0.0387 | 0.9106 | 0.7275 |
-| scale=0.3 | 306.33 | 0.307 | 0.026 | 0.9120 | 0.7202 |
-| scale=0.7 | 313.64 | 0.304 | 0.020 | 0.9142 | 0.7208 |
-| scale=1.0 | 311.24 | 0.303 | 0.022 | 0.9136 | 0.7189 |
-| CSA off | — | — | — | — | — |
+| Condition | FID↓ | Char F1↑ | Frame Acc↑ | CLIP↑ | DINOv2↑ | IPS↑ |
+|-----------|------|----------|------------|-------|---------|------|
+| scale=0.0 (baseline) | 295.82 | 0.2572 | 0.0387 | 0.9106 | 0.7275 | 0.7604 |
+| scale=0.3 | 306.33 | 0.307 | 0.026 | 0.9120 | 0.7202 | 0.7709 |
+| scale=0.5 (main) | 310.23 | 0.2557 | 0.0375 | 0.9132 | 0.7232 | 0.7737 |
+| scale=0.7 | 313.64 | 0.304 | 0.020 | 0.9142 | 0.7208 | 0.7778 |
+| scale=1.0 | 311.24 | 0.303 | 0.022 | 0.9136 | 0.7189 | 0.7797 |
+| CSA off | 158.86 | 0.288 | 0.030 | 0.8674 | 0.6121 | 0.7844 |
 
-Note: High FID is expected — SD 1.5 generates photorealistic images while PororoSV is cartoon. Key comparison is cross-frame CLIP/DINOv2 consistency and IPS across ablations. IPS column pending — running now. CSA ablation pending.
+Key findings:
+- IPS rises monotonically with identity scale (0.7604→0.7797) — adapter directly improves reference identity preservation.
+- Cross-frame CLIP rises with scale, peaks at 0.7 (0.9106→0.9142) — identity conditioning improves cross-frame consistency.
+- CSA removal causes massive consistency drop (CLIP 0.9132→0.8674, DINOv2 0.7232→0.6121) — proves CSA's contribution.
+- CSA off has better FID (158.86 vs 310.23) and IPS (0.7844 vs 0.7737) but far worse consistency — trade-off worth discussing.
+- High FID with CSA on is expected — SD 1.5 photorealistic vs PororoSV cartoon domain gap.
 
 **Remaining eval commands:**
 
